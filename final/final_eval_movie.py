@@ -18,15 +18,7 @@ import scipy
 
 # Load Depth Model
 pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf")
-model_type = "DPT_Large"     # MiDaS v3 - Large     (highest accuracy, slowest inference speed)
 
-midas = torch.hub.load("intel-isl/MiDaS", model_type)
-
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-midas.to(device)
-midas.eval()
-
-midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 # Load Sam
 model_type = "vit_b"
 sam_checkpoint = "model/"+model_type+".pth"
@@ -42,7 +34,6 @@ def calc_center( mask ):
     coords = np.where(mask==True)
     x = coords[0].sum() / coords[0].shape
     y = coords[1].sum() / coords[1].shape
-
     return int(y), int(x)
 
 def calc_iou(im_1, im_2):
@@ -131,7 +122,6 @@ def display_bb(bbs, image):
             p2 = (bb[1][1], bb[1][0])
             image = cv2.rectangle(image, p1,p2, (0,0,255), 1)
     return image
-
 
 def bw_frame(frame):
     return (frame[...,0] + frame[...,1] + frame[...,2])/3
@@ -244,36 +234,27 @@ def background_removal(masks, mask_depth_vis, threshhold_depth):
             foreground_masks.append(masks[i])
             
     return foreground_masks
-    
-iou_error = 0.9
-lam_dis = 1
-lam_col = 1
-num_masks_removal = 3
-number_of_masks = 30
-bb_max_size = (128*128)/3
-threshhold_depth = 0.1
 
-def get_results(rand_images, rand_frames):
+def get_results(start_im, stop_im, iou_error, lam_dis, lam_col, lam_cen, num_masks_removal, number_of_masks, bb_max_size, threshhold_depth):
+    error = []
 
-    error = 0
-
-    for i in rand_images:
-        mkdir("images/"+str(i)+"/")
+    for i in range(start_im, stop_im):
         data = np.load('data/MOVIE/videos/'+str(i)+'.npy')
         annotation = np.load('data/MOVIE/segmentations/'+str(i)+'.npy')
 
-        for xsx in rand_frames:
-            frame = data[xsx]
-            an = annotation[xsx]
-            bw_image = bw_frame(frame.copy())
-            norm_bw = normalise(bw_image.copy())
+        end_masks = []
+
+        # predict the depth values
+        for j, frame in enumerate(data): 
+            bw_image = bw_frame( frame.copy() )
+            norm_bw = normalise( bw_image.copy() )
+            an = annotation[j]
 
             # predict the depth values
             depth_vals = np.array(pipe(Image.fromarray(bw_image.copy()))["depth"])
 
             sobel = create_sobel(norm_bw.copy())
             sobel = np.digitize(sobel, bins=[sobel.mean()]).astype(np.uint8)
-
 
             sobel = np.digitize(sobel, bins=[sobel.mean()]).astype(np.uint8)
             regions = skimage.morphology.label(sobel,1)
@@ -289,9 +270,6 @@ def get_results(rand_images, rand_frames):
                 dis_mat = calc_div_matrix(centerdepth)
                 col_mat = calc_div_matrix(color_mean)
                 cen_mat = calc_dist_matrix(norm_center)
-
-                
-                lam_cen = 1/cen_mat.std()**2
 
                 dis = lam_dis * math.e**(-lam_dis * dis_mat)
                 col = lam_col * math.e**(-lam_col * col_mat)
@@ -358,17 +336,18 @@ def get_results(rand_images, rand_frames):
             bb_num = torch.from_numpy(bb_num).to("cuda")
 
             # WHAT TO DO IF THERE ARE NO BOXES
-            if bb_num.shape == 0:
-                return 0
             transformed_boxes = predictor.transform.apply_boxes_torch(bb_num, frame.shape[:2])
-            masks, _, _ = predictor.predict_torch(
-                point_coords=None,
-                point_labels=None,
-                boxes=transformed_boxes,
-                multimask_output=False,
-            )
             
-            masks = masks.cpu().numpy().squeeze()
+            try:
+                masks, _, _ = predictor.predict_torch(
+                    point_coords=None,
+                    point_labels=None,
+                    boxes=transformed_boxes,
+                    multimask_output=False,
+                )
+                masks = masks.cpu().numpy().squeeze()
+            except:
+                masks = [np.zeros((128,128))]
 
             # merge masks with high iou
             masks = unify_masks_by_iou(list(masks), iou_error)
@@ -388,105 +367,31 @@ def get_results(rand_images, rand_frames):
                 non_overlap = (final == 0) * mask
                 deep = mask_depth_vis[x][0]
                 final = final + non_overlap * (x+1)
-            
-            cv2.imwrite("images/"+str(i)+"/final.jpg", three_dim(final))
-            cv2.imwrite("images/"+str(i)+"/ann.jpg", three_dim(an.squeeze()) )
 
-            error = error + calc_iou(final,an.squeeze())
-
-    return error / (len(rand_images) * len(rand_frames))
-
-
- # iou_error   lam_dis   lam_col   num_masks_removal   number_of_masks   bb_max_size   threshhold_depth
-def change_params( direction, change ):
-    global iou_error   
-    global lam_dis   
-    global lam_col   
-    global number_of_masks   
-    global bb_max_size   
-    global threshhold_depth
-    
-    iou_error = iou_error + (change[0] * iou_error * direction[0] )
-    lam_dis = lam_dis + (change[1] * lam_dis * direction[1] )
-    lam_col = lam_col + (change[2] * lam_col * direction[2] )
-    number_of_masks = number_of_masks + (change[3] * number_of_masks * direction[3] )
-    bb_max_size = bb_max_size + (change[4] * bb_max_size * direction[4] )
-    threshhold_depth = threshhold_depth + (change[5] * threshhold_depth * direction[5] )
-    return
-
-def print_params():
-    global iou_error   
-    global lam_dis   
-    global lam_col   
-    global number_of_masks   
-    global bb_max_size   
-    global threshhold_depth
-    print("new params:")
-    print("iou_error:           ",str(iou_error))
-    print("lam_dis:             ",str(lam_dis))
-    print("lam_col:             ",str(lam_col))
-    print("number_of_masks:     ",str(number_of_masks))
-    print("bb_max_size:         ",str(bb_max_size))
-    print("threshhold_depth:    ",str(threshhold_depth))
-    print("-------------------------------------------")
-    sys.stdout.flush()
-
-def parameter_fitting_all(epochs, iterations, im_per_iter):
-    change = [0.01, 0.05, 0.05, 0.05, 0.05, 0.05 ]
-
-    for x in range(epochs):
-        sys.stdout.flush()
-        direction_of_change = []
-
-        for i in range(6):
-            if x%7 == i:
-                direction_of_change.append(1)
-            else:
-                direction_of_change.append(0)
+            error.append(calc_iou(final,an.squeeze()))
+            print(np.array(error).mean())
+            end_masks.append(final)
+            sys.stdout.flush()
         
-        direction_of_change = np.array(direction_of_change)
-
-        rand_images = [ random.randint(0,50) for x in range(iterations) ]
-        rand_frames = [ random.randint(0,23) for x in range(im_per_iter) ]
-
-        neut = get_results(rand_images,rand_frames)
-        change_params(direction_of_change, change)
-        pos = get_results(rand_images,rand_frames)
-        direction_of_change *= -1
-        change_params(direction_of_change, change)
-        change_params(direction_of_change, change)
-        neg = get_results(rand_images,rand_frames)
-
-        direction_of_change *= -1
-
-        if pos > neg and pos > neut:
-            change_params(direction_of_change, change)
-            change_params(direction_of_change, change)
-            print("neut")
+        save = np.expand_dims(np.array(end_masks), axis=3)
+        with open('images/'+str(i)+".npy", 'wb') as f:
+            np.save(f, save)
         
-        elif neut > neg and neut > pos:
-            change_params(direction_of_change, change)
-            print("pos")
+        print()
+        print(error)
 
-        else:
-            print("neg")
-        
-        print_params()
-                    
-
-
-def check_parameters():
-    results = []
-    for x in range(50):
-        results.append(get_results([x],[3]))
-
-    results = np.array(results)
-    print("Mean: "+str(results.mean()))
-    print("Std: "+str(results.std()))
-    sys.stdout.flush()
+    return np.array(error)
 
 print("Start")
 sys.stdout.flush()
-check_parameters()
-parameter_fitting_all(50, 15, 1)
-check_parameters()
+
+iou_error = 0.6999767575931171
+lam_dis = 0.4857960596501819
+lam_col = 1.333162991068244
+lam_cen = 0.9949257659737076
+number_of_masks = 88.23409125785362
+bb_max_size = 3709.046470782817
+threshhold_depth = 0.01191918304719054
+num_masks_removal = 3
+
+get_results(0, 250, iou_error, lam_dis, lam_col, lam_cen, num_masks_removal, number_of_masks, bb_max_size, threshhold_depth)
