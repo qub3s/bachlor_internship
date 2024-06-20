@@ -239,6 +239,8 @@ def get_results(start_im, stop_im, iou_error, lam_dis, lam_col, lam_cen, num_mas
     error = []
 
     for i in range(start_im, stop_im):
+        print()
+        print(i)
         data = np.load('data/MOVIE/videos/'+str(i)+'.npy')
         annotation = np.load('data/MOVIE/segmentations/'+str(i)+'.npy')
 
@@ -377,18 +379,18 @@ def get_results(start_im, stop_im, iou_error, lam_dis, lam_col, lam_cen, num_mas
         with open('images/'+str(i)+".npy", 'wb') as f:
             np.save(f, save)
         
-        print()
-        print(error)
-
+    
+    print()
+    print(error)
     return np.array(error)
 
 print("Start")
 sys.stdout.flush()
 
 iou_error = 0.6999767575931171
-lam_dis = 0.4857960596501819
-lam_col = 1.333162991068244
-lam_cen = 0.9949257659737076
+lam_dis = 0.5155753946424606
+lam_col = 1.4193375111975206
+lam_cen = 0.9949265265390193
 number_of_masks = 88.23409125785362
 bb_max_size = 3709.046470782817
 threshhold_depth = 0.01191918304719054

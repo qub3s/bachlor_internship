@@ -1,8 +1,11 @@
 ### General Questions
-- Research Questions: Automatic Prompting of Segment Anything with limited Data availability on the MOVIE and DAVIS Dataset ?
-- Reference for the Movie Dataset ?
-- should the data used for the plot be put in the appendix ?
-- should i use yolo segmentation on davis dataset 
+- Research Questions: Automatic Prompting of Segment Anything with limited Data on the MOVIE and DAVIS Dataset ?
+- should the data used for the plot be put in the appendix ? - dont show the data
+- should i use yolo segmentation on davis dataset ? - maybe later
+- how does per object iou work -> mean best overlap (mean over all best match)
+
+Moviee
+NO TRAINING
 
 ### TODO
 - Rerun Davis and check results
