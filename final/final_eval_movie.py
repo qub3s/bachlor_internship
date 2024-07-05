@@ -23,12 +23,14 @@ pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-h
 model_type = "vit_b"
 sam_checkpoint = "model/"+model_type+".pth"
 
-torch.cuda.set_device(7)
+torch.cuda.set_device(1)
 
 sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
 sam.to("cuda")
 
 predictor = SamPredictor(sam)
+
+
 # Functions
 def calc_center( mask ):
     coords = np.where(mask==True)
@@ -396,4 +398,4 @@ bb_max_size = 3709.046470782817
 threshhold_depth = 0.01191918304719054
 num_masks_removal = 3
 
-get_results(0, 250, iou_error, lam_dis, lam_col, lam_cen, num_masks_removal, number_of_masks, bb_max_size, threshhold_depth)
+get_results(0, 10, iou_error, lam_dis, lam_col, lam_cen, num_masks_removal, number_of_masks, bb_max_size, threshhold_depth)

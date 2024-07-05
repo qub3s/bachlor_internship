@@ -96,8 +96,8 @@ im_per_iter = 2
 rand_images = [ x for x in range(iterations) ]
 rand_frames = [ random.randint(0,23) for x in range(im_per_iter*iterations) ]
 
-for xss in range(0,51,5):
-    actual_threshold = xss/100
+for xss in range(0,10):
+    actual_threshold = xss/200
     iou_av = 0
     counter = 1
 

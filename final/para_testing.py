@@ -410,7 +410,6 @@ def parameter_fitting_all(epochs, max_image_value, num_frames, decrease, increas
     test_values_index = []
 
     redo = False
-    x = 30
     while x < epochs:
         if redo:
             x -= 1

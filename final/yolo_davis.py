@@ -7,10 +7,12 @@ import random
 import cv2
 import time
 from transformers import SamConfig, SamModel, SamProcessor, SamVisionConfig, SamPromptEncoderConfig, SamMaskDecoderConfig
+import ultralytics
+import sys
 
 # load data
 
-data_dir = "./data/DAVIS_trainval/"
+data_dir = "data/DAVIS/"
 
 image_path = data_dir + "JPEGImages/480p/"
 annotation_path = data_dir + "Annotations/480p/"
@@ -73,14 +75,14 @@ from segment_anything import sam_model_registry, SamPredictor
 # Define SAM
 torch.cuda.set_device(0)
 
-sam_checkpoint = "../model/vit_h.pth"
+sam_checkpoint = "model/vit_h.pth"
 model_type = "vit_h"
 sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
 sam.to("cuda")
 predictor = SamPredictor(sam)
 
 # Define Yolo
-model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, verbose=False)
+model = torch.hub.load('ultralytics/yolov5', 'yolov5x6', pretrained=True, verbose=False)
 
 def show_masks_on_image(raw_image, masks, scores):
     if len(masks.shape) == 4:
@@ -107,7 +109,6 @@ def show_mask_yolo(mask, ax, random_color=False):
     h, w = mask.shape[-2:]
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
     ax.imshow(mask_image)
-
 
 def yolo_eval_batch( model, batch, threshhold ):
     res = []
@@ -173,7 +174,7 @@ def unify_masks(masks):
     
     return uni
 
-def calc_iou(masks, an):
+def calc_iou_full(masks, an):
     uni = unify_masks(masks)
     an = unify_masks(an)                 # has 3 channels
     
@@ -181,6 +182,44 @@ def calc_iou(masks, an):
     union = np.logical_or(uni,an)
     
     return np.sum(intersection)/np.sum(union)
+
+def three_dim_int(x):
+    return x[0] +  x[1]*256 + x[2]*65536
+
+def calc_iou_per(masks, an):
+    an_2 = torch.from_numpy(an).permute(1,2,0).numpy()
+    unique_colors = np.unique(an_2.copy().reshape(-1,an_2.shape[2]), axis=0)
+
+    annotations = three_dim_int(an.copy().astype(np.longlong))
+    annotations = np.digitize(annotations, bins=np.unique(annotations)) - 1
+
+    anno_for_masks = []
+
+    size = []
+
+    for i in range(1,  annotations.max() + 1 ):
+        anno_for_masks.append([])
+        c_mask = annotations == i
+        size.append(c_mask.sum())
+        for mask in masks:
+            mask = mask.squeeze()
+            intersection = np.logical_and(mask, c_mask)
+            union = np.logical_or(mask,c_mask)   
+            anno_for_masks[i-1].append(np.sum(intersection)/np.sum(union))          
+    
+    final_values = []
+
+    for x in anno_for_masks:
+        final_values.append(max(x))
+    
+    size = np.array(size)
+    size = size/size.sum()
+
+    summe = 0
+    for s, v in zip(size, final_values):
+        summe += v * s
+
+    return summe, np.array(final_values).mean()
 
 def masks_indexes(masks):
     final = np.zeros(masks[0].shape)
@@ -192,19 +231,6 @@ def masks_indexes(masks):
     
     return final
 
-
-# 35 - poor
-# 11 - poor
-# 21 - poor
-
-# 15 - good
-# 13 - good
-# 25 - good
-
-# 8  - average
-# 38 - average
-# 68 - average
-
 def show_mask(mask, ax, random_color=False):
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
@@ -215,15 +241,21 @@ def show_mask(mask, ax, random_color=False):
     ax.imshow(mask_image)
     ax.axis("off")
 
-iou_list = []
+iou_list_full = []
+iou_list_per = []
+iou_list_per_amor = []
+print(get_num_images())
 
-for x in range(get_num_images()):       
+for x in range(get_num_images()): 
+    print(x)     
+    sys.stdout.flush() 
     name , im, an = get_image(x)
+
+    iou_list_full.append([])
+    iou_list_per.append([])
+    iou_list_per_amor.append([])
     
     masks = yolo_eval_batch( model, im, 0 )
-    
-    #show_yolo_mask(im[0], masks[0])
-    #show_yolo_mask(an[0], masks[0])
 
     iou_av = 0
     sam_masks = []
@@ -232,22 +264,21 @@ for x in range(get_num_images()):
         sam_mask = sam_with_yolo_mask(model, predictor, masks[i], im[i])
         sam_masks.append(masks_indexes(sam_mask.copy()))
 
-        iou = calc_iou(sam_mask, an_permute)
-        iou_av += iou
-        #display_mask(sam_mask)
+        iou_list_full[x].append(calc_iou_full( sam_mask.copy(), an_permute.copy() ))
+        
+        amo_per, per = calc_iou_per( sam_mask.copy(), an_permute.copy() )
+        
+        iou_list_per[x].append(per)
+        iou_list_per_amor[x].append(amo_per)
     
-    iou_av /= len(masks)
-    iou_list.append(iou_av)
-
     path = "davis_masks/"+name
     np.save(path, np.concatenate(sam_masks).astype(np.ubyte))
 
-    print(name, ": ",iou_av)
 
-#import seaborn as sns
 
-iou = np.array(iou_list)
-print("Mean: ",iou.mean())
-print("Median: ", np.median(iou))
 
-#tsns.kdeplot(data=iou, clip=[0,1], fill=True, common_norm=True)
+print(iou_list_full)
+print()
+print(iou_list_per)
+print()
+print(iou_list_per_amor)
