@@ -1,37 +1,33 @@
 from transformers import pipeline
 from PIL import Image
-import requests
-import numpy as np
-import cv2
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+from sklearn.cluster import KMeans
+from skimage import filters, color, morphology
+from skimage.segmentation import flood, flood_fill
 import torch
 import matplotlib.pyplot as plt
 import sys
-from skimage import filters, color, morphology
-from skimage.segmentation import flood, flood_fill
 import skimage
 import math
 import os
 import random
-from sklearn.cluster import KMeans
 import scipy
+import requests
+import numpy as np
+import cv2
 
-# Load Depth Model
-pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf")
+pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf", device=1)
 
-# Load Sam
-model_type = "vit_b"
-sam_checkpoint = "model/"+model_type+".pth"
+model_type = "vit_h"
+sam_checkpoint = "../model/"+model_type+".pth"
 
-torch.cuda.set_device(1)
+torch.cuda.set_device(5)
 
 sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
 sam.to("cuda")
 
 predictor = SamPredictor(sam)
 
-
-# Functions
 def calc_center( mask ):
     coords = np.where(mask==True)
     x = coords[0].sum() / coords[0].shape
@@ -139,7 +135,6 @@ def normalise(x):
 def point_dist(p1,p2):
     return math.sqrt( (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2  )
 
-# Average distance between points is 1
 def calc_normalize(center):
     centerx = np.array([ x  for x,y in center])
     centery = np.array([ y  for x,y in center])
@@ -201,7 +196,6 @@ def calc_depth_mean(depth, mask_arr):
 
     return mean_depths
 
-# unify masks
 def unify_masks_by_iou(mask_all, iou_thresh):
     len_mask_all = len(mask_all)
     iou_err = np.zeros((len_mask_all,len_mask_all))
@@ -241,10 +235,10 @@ def get_results(start_im, stop_im, iou_error, lam_dis, lam_col, lam_cen, num_mas
     error = []
 
     for i in range(start_im, stop_im):
-        print()
+        
         print(i)
-        data = np.load('data/MOVIE/videos/'+str(i)+'.npy')
-        annotation = np.load('data/MOVIE/segmentations/'+str(i)+'.npy')
+        sys.stdout.flush()
+        data = np.load('../../movi_e/train/videos/'+str(i)+'.npy')
 
         end_masks = []
 
@@ -252,7 +246,6 @@ def get_results(start_im, stop_im, iou_error, lam_dis, lam_col, lam_cen, num_mas
         for j, frame in enumerate(data): 
             bw_image = bw_frame( frame.copy() )
             norm_bw = normalise( bw_image.copy() )
-            an = annotation[j]
 
             # predict the depth values
             depth_vals = np.array(pipe(Image.fromarray(bw_image.copy()))["depth"])
@@ -370,15 +363,12 @@ def get_results(start_im, stop_im, iou_error, lam_dis, lam_col, lam_cen, num_mas
             for x, mask in enumerate(masks):
                 non_overlap = (final == 0) * mask
                 deep = mask_depth_vis[x][0]
-                final = final + non_overlap * (x+1)
-
-            error.append(calc_iou(final,an.squeeze()))
-            print(np.array(error).mean())
+                final = final + non_overlap * (x+1) 
+            
             end_masks.append(final)
-            sys.stdout.flush()
-        
+
         save = np.expand_dims(np.array(end_masks), axis=3)
-        with open('images/'+str(i)+".npy", 'wb') as f:
+        with open('../images/'+str(i)+".npy", 'wb') as f:
             np.save(f, save)
         
     
@@ -398,4 +388,7 @@ bb_max_size = 3709.046470782817
 threshhold_depth = 0.01191918304719054
 num_masks_removal = 3
 
-get_results(0, 10, iou_error, lam_dis, lam_col, lam_cen, num_masks_removal, number_of_masks, bb_max_size, threshhold_depth)
+# 2437 x 4
+# 0 - 2437 - 4874 - 7311 - 9749
+# 0 - 3 - 4 - 5
+get_results(7311, 9749, iou_error, lam_dis, lam_col, lam_cen, num_masks_removal, number_of_masks, bb_max_size, threshhold_depth)
